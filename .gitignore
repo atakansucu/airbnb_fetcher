@@ -9,3 +9,4 @@ logs/*.log
 .pytest_cache/
 .DS_Store
 .playwright-browsers/
+.playwright-browsers/
