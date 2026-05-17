@@ -195,6 +195,18 @@ class MonitorService:
         alerts: list[Alert] = []
         body = "\n".join(scored.summary_lines())
         ncfg = self.config.notifications
+        gate_reason = self.ranker.notification_gate_reason(listing)
+
+        if gate_reason is not None:
+            logger.info(
+                "notification_skipped_by_gate",
+                listing_id=listing.listing_id,
+                reason=gate_reason,
+                total_price_eur=listing.total_price_eur,
+                max_total_price_eur=self.config.trip.max_total_price_eur,
+                score=scored.composite_score,
+            )
+            return alerts
 
         if scored.is_rare_deal and ncfg.notify_on_rare_deal:
             alerts.append(
