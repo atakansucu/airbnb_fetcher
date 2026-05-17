@@ -44,3 +44,27 @@ def test_parse_structured_display_price_discounted(scraper: AirbnbScraper) -> No
 def test_parse_price_from_text_picks_discounted_total(scraper: AirbnbScraper) -> None:
     text = "€\xa02,814 \n€\xa02,167\xa0total"
     assert scraper._parse_price_from_text(text) == 2167.0
+
+
+def test_parse_price_from_text_total_without_grouping(scraper: AirbnbScraper) -> None:
+    assert scraper._parse_price_from_text("€738 total") == 738.0
+
+
+def test_parse_price_from_text_nightly_price_as_trip_total(scraper: AirbnbScraper) -> None:
+    assert scraper._parse_price_from_text("€123 night") == 738.0
+
+
+def test_parse_price_string_localized_formats(scraper: AirbnbScraper) -> None:
+    assert scraper._parse_price_string("€1.234") == 1234.0
+    assert scraper._parse_price_string("€1.234,56") == 1234.56
+    assert scraper._parse_price_string("€1,234.56") == 1234.56
+
+
+def test_parse_structured_display_price_nightly(scraper: AirbnbScraper) -> None:
+    sdp = {
+        "primaryLine": {
+            "price": "€123",
+            "qualifier": "night",
+        }
+    }
+    assert scraper._parse_structured_display_price(sdp) == 738.0

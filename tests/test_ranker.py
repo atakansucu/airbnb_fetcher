@@ -42,7 +42,19 @@ def test_far_expensive_scores_lower():
         lat=41.35,
         lng=2.25,
     )
+    assert ranker.passes_hard_filters(listing)
+    assert ranker.notification_gate_reason(listing) == "over_max_total_price_eur"
+
+
+def test_missing_price_is_invalid():
+    ranker = _ranker()
+    listing = Listing(
+        listing_id="3",
+        title="No price",
+        url="https://airbnb.com/rooms/3",
+    )
     assert not ranker.passes_hard_filters(listing)
+    assert ranker.invalid_reason(listing) == "missing_price"
 
 
 def test_haversine_distance():

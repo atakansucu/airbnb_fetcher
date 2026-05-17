@@ -42,28 +42,44 @@ class ListingRanker:
         return listing
 
     def passes_hard_filters(self, listing: Listing) -> bool:
+        return self.invalid_reason(listing) is None
+
+    def invalid_reason(self, listing: Listing) -> str | None:
+        """Return why a listing cannot be scored/stored, or None when usable."""
+        listing = self.enrich_listing(listing)
+
+        if not listing.url:
+            return "missing_url"
+        if listing.total_price_eur is None:
+            return "missing_price"
+        if listing.total_price_eur <= 0:
+            return "invalid_price"
+        return None
+
+    def notification_gate_reason(self, listing: Listing) -> str | None:
+        """Return why a valid listing is outside preferred notification gates."""
         f = self.config.filters
         t = self.config.trip
         listing = self.enrich_listing(listing)
 
-        if listing.total_price_eur is None:
-            return False
-        if listing.total_price_eur > t.max_total_price_eur:
-            return False
+        if listing.total_price_eur is not None and listing.total_price_eur > t.max_total_price_eur:
+            return "over_max_total_price_eur"
         if f.max_distance_km is not None:
-            if listing.distance_km is None or listing.distance_km > f.max_distance_km:
-                return False
+            if listing.distance_km is None:
+                return "missing_distance"
+            if listing.distance_km > f.max_distance_km:
+                return "over_max_distance_km"
         if listing.review_score is not None and listing.review_score < f.min_review_score:
-            return False
+            return "below_min_review_score"
         if f.require_entire_home and not listing.is_entire_home:
-            return False
+            return "not_entire_home"
         if f.require_free_cancellation and not listing.free_cancellation:
-            return False
+            return "no_free_cancellation"
         if f.require_superhost and not listing.is_superhost:
-            return False
+            return "not_superhost"
         if f.require_self_check_in and not listing.self_check_in:
-            return False
-        return True
+            return "no_self_check_in"
+        return None
 
     def score_distance(self, distance_km: float | None) -> float:
         """0–100; 0 km = 100, 5+ km decays toward 0."""

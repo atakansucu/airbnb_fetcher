@@ -47,8 +47,37 @@ class MonitorService:
             return 0
 
         scored: list[ScoredListing] = []
+        invalid_count = 0
         for listing in listings:
-            if not self.ranker.passes_hard_filters(listing):
+            invalid_reason = self.ranker.invalid_reason(listing)
+            gate_reason = self.ranker.notification_gate_reason(listing)
+            logger.debug(
+                "listing_debug",
+                listing_id=listing.listing_id,
+                title=listing.title,
+                url=listing.url,
+                total_price_eur=listing.total_price_eur,
+                price_per_night_eur=listing.price_per_night_computed,
+                rating=listing.review_score,
+                room_type=listing.room_type,
+                is_entire_home=listing.is_entire_home,
+                free_cancellation=listing.free_cancellation,
+                cancellation_info="free_cancellation"
+                if listing.free_cancellation
+                else "not_detected",
+                neighborhood=listing.neighborhood,
+                location={
+                    "lat": listing.lat,
+                    "lng": listing.lng,
+                    "distance_km": listing.distance_km,
+                },
+                filtered_out=invalid_reason is not None,
+                filter_reason=invalid_reason,
+                notification_gate_reason=gate_reason,
+                max_total_price_eur=self.config.trip.max_total_price_eur,
+            )
+            if invalid_reason is not None:
+                invalid_count += 1
                 continue
             scored.append(self.ranker.score_listing(listing))
 
@@ -62,6 +91,7 @@ class MonitorService:
             "cycle_scored",
             total=len(listings),
             matched=len(scored),
+            invalid=invalid_count,
             top_score=scored[0].composite_score if scored else None,
         )
 

@@ -279,7 +279,8 @@ class AirbnbScraper:
     if not isinstance(sdp, dict):
       return None
     primary = sdp.get("primaryLine") or {}
-    if primary.get("qualifier") not in (None, "total"):
+    qualifier = str(primary.get("qualifier") or "").lower()
+    if qualifier and "total" not in qualifier and "night" not in qualifier:
       return None
 
     for key in ("discountedPrice", "price"):
@@ -287,6 +288,8 @@ class AirbnbScraper:
       if val:
         parsed = self._parse_price_string(str(val))
         if parsed:
+          if "night" in qualifier:
+            return parsed * self._nights()
           return parsed
 
     label = primary.get("accessibilityLabel")
@@ -460,11 +463,29 @@ class AirbnbScraper:
     return None
 
   def _parse_price_string(self, s: str) -> float | None:
-    cleaned = re.sub(r"[^\d.,]", "", s.replace(",", ""))
+    cleaned = re.sub(r"[^\d.,]", "", s.replace("\xa0", "").replace(" ", ""))
+    if not cleaned:
+      return None
+    if "," in cleaned and "." in cleaned:
+      if cleaned.rfind(",") > cleaned.rfind("."):
+        cleaned = cleaned.replace(".", "").replace(",", ".")
+      else:
+        cleaned = cleaned.replace(",", "")
+    elif "," in cleaned:
+      parts = cleaned.split(",")
+      if len(parts[-1]) == 2 and len(parts) == 2:
+        cleaned = ".".join(parts)
+      else:
+        cleaned = "".join(parts)
+    elif "." in cleaned:
+      parts = cleaned.split(".")
+      if len(parts) > 2 or len(parts[-1]) == 3:
+        cleaned = "".join(parts)
     try:
-      return float(cleaned)
+      parsed = float(cleaned)
     except ValueError:
       return None
+    return parsed if parsed > 0 else None
 
   def _extract_rating_from_dict(self, d: dict[str, Any]) -> float | None:
     for key in ("avgRating", "rating", "starRating", "avgRatingLocalized"):
@@ -559,19 +580,34 @@ class AirbnbScraper:
 
   def _parse_price_from_text(self, text: str) -> float | None:
     nights = self._nights()
-    patterns = [
-      rf"€\s*([\d,]+)\s*total(?:\s+for\s+{nights}\s+nights?)?",
-      rf"€\s*([\d,]+)\s*for\s+{nights}\s+nights?",
-      r"€\s*([\d,]+)\s*total",
-      r"€\s*([\d,]+)\s*for\s+\d+\s+nights?",
+    normalized = text.replace("\xa0", " ")
+    amount = r"([\d][\d\s.,]*)"
+    total_patterns = [
+      rf"€\s*{amount}\s*(?:total|for\s+{nights}\s+nights?)",
+      rf"€\s*{amount}\s*for\s+\d+\s+nights?",
+      rf"(?:total|for\s+{nights}\s+nights?)\s*€\s*{amount}",
+      rf"total\s*€\s*{amount}",
     ]
     found: list[float] = []
-    for pattern in patterns:
-      for m in re.finditer(pattern, text, re.IGNORECASE):
+    for pattern in total_patterns:
+      for m in re.finditer(pattern, normalized, re.IGNORECASE):
         p = self._parse_price_string(m.group(1))
         if p and p > 50:
           found.append(p)
-    return found[-1] if found else None
+    if found:
+      return found[-1]
+
+    nightly_patterns = [
+      rf"€\s*{amount}\s*(?:/)?\s*(?:night|per\s+night)",
+      rf"(?:nightly|per\s+night)\s*€\s*{amount}",
+    ]
+    nightly: list[float] = []
+    for pattern in nightly_patterns:
+      for m in re.finditer(pattern, normalized, re.IGNORECASE):
+        p = self._parse_price_string(m.group(1))
+        if p and p > 10:
+          nightly.append(p)
+    return nightly[-1] * nights if nightly else None
 
   def _parse_rating_from_text(self, text: str) -> float | None:
     m = re.search(r"(\d\.\d{1,2})\s*(?:\(|·|out of)", text)
