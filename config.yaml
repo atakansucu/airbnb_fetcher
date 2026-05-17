@@ -7,7 +7,7 @@ trip:
 
 polling:
   interval_minutes: 20
-  max_pages_per_run: 3
+  max_pages_per_run: 5
 
 scraper:
   headless: true

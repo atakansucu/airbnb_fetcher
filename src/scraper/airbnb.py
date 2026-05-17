@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import random
 import re
 import time
 from datetime import datetime
@@ -80,6 +81,8 @@ class AirbnbScraper:
   def scrape(self, max_pages: int | None = None) -> list[Listing]:
     max_pages = max_pages or self.config.polling.max_pages_per_run
     all_listings: dict[str, Listing] = {}
+    total_scraped = 0
+    started = time.monotonic()
 
     try:
       browser = self._launch_browser()
@@ -92,26 +95,109 @@ class AirbnbScraper:
       page.set_default_timeout(self.config.scraper.browser_timeout_ms)
 
       for page_idx in range(max_pages):
-        url = self.build_search_url(page_offset=page_idx)
-        logger.info("scraping_page", url=url, page=page_idx + 1)
-        listings = self._scrape_page(page, url)
+        requested_url = self.build_search_url(page_offset=page_idx)
+        navigation_method = "initial_url"
+        if page_idx == 0:
+          url = requested_url
+          scrape_page = lambda: self._scrape_page(page, url)
+        elif self._go_to_next_results_page(page):
+          url = page.url
+          navigation_method = "pagination_next"
+          scrape_page = lambda: self._extract_current_page(page, url)
+        else:
+          url = requested_url
+          navigation_method = "offset_url_fallback"
+          scrape_page = lambda: self._scrape_page(page, url)
+
+        page_started = time.monotonic()
+        logger.info(
+          "scraping_page",
+          url=url,
+          page=page_idx + 1,
+          pages_total=max_pages,
+          navigation_method=navigation_method,
+          total_scraped=total_scraped,
+          total_unique=len(all_listings),
+        )
+        listings = scrape_page()
+        total_scraped += len(listings)
         for lst in listings:
           all_listings[lst.listing_id] = lst
-        time.sleep(self.config.scraper.scrape_delay_seconds)
+        elapsed = time.monotonic() - started
+        page_elapsed = time.monotonic() - page_started
+        pages_done = page_idx + 1
+        avg_page_seconds = elapsed / pages_done
+        estimated_runtime_seconds = avg_page_seconds * max_pages
+        duplicates_removed = total_scraped - len(all_listings)
+        logger.info(
+          "scraping_page_complete",
+          page=pages_done,
+          pages_total=max_pages,
+          navigation_method=navigation_method,
+          page_listings=len(listings),
+          total_scraped=total_scraped,
+          total_unique=len(all_listings),
+          duplicates_removed=duplicates_removed,
+          page_seconds=round(page_elapsed, 2),
+          elapsed_seconds=round(elapsed, 2),
+          estimated_runtime_seconds=round(estimated_runtime_seconds, 2),
+        )
+        if page_idx < max_pages - 1:
+          delay = self._page_delay_seconds()
+          logger.debug("scraping_page_delay", seconds=round(delay, 2))
+          time.sleep(delay)
 
       context.close()
     except Exception as exc:
       logger.exception("scrape_failed", error=str(exc))
       raise
 
-    logger.info("scrape_complete", count=len(all_listings))
+    elapsed = time.monotonic() - started
+    logger.info(
+      "scrape_complete",
+      count=len(all_listings),
+      total_scraped=total_scraped,
+      total_unique=len(all_listings),
+      duplicates_removed=total_scraped - len(all_listings),
+      pages=max_pages,
+      elapsed_seconds=round(elapsed, 2),
+    )
     return list(all_listings.values())
 
+  def _page_delay_seconds(self) -> float:
+    base = max(0.0, self.config.scraper.scrape_delay_seconds)
+    jitter = random.uniform(0.5, 1.75)
+    return base + jitter
+
   def _scrape_page(self, page: Page, url: str) -> list[Listing]:
+    page.goto(url, wait_until="domcontentloaded")
+    return self._extract_current_page(page, url)
+
+  def _go_to_next_results_page(self, page: Page) -> bool:
+    selectors = [
+      'nav[aria-label="Search results pagination"] a[aria-label="Next"]',
+      'nav[aria-label="Search results pagination"] button[aria-label="Next"]:not([disabled])',
+      'a[aria-label="Next"]',
+      'button[aria-label="Next"]:not([disabled])',
+    ]
+    for selector in selectors:
+      try:
+        next_button = page.locator(selector).last
+        if not next_button.is_visible(timeout=1000):
+          continue
+        next_button.click()
+        page.wait_for_load_state("domcontentloaded", timeout=15000)
+        page.wait_for_timeout(2000)
+        return True
+      except Exception:
+        continue
+    logger.info("pagination_next_unavailable", url=page.url)
+    return False
+
+  def _extract_current_page(self, page: Page, url: str) -> list[Listing]:
     listings: list[Listing] = []
 
     try:
-      page.goto(url, wait_until="domcontentloaded")
       page.wait_for_timeout(3000)
 
       # Dismiss cookie/consent banners if present

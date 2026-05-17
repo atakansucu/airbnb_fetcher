@@ -42,7 +42,7 @@ class TripConfig:
 @dataclass
 class PollingConfig:
     interval_minutes: int = 20
-    max_pages_per_run: int = 3
+    max_pages_per_run: int = 5
 
 
 @dataclass
@@ -145,7 +145,7 @@ def load_config(env_file: Path | None = None) -> AppConfig:
         ),
         polling=PollingConfig(
             interval_minutes=_env_int("POLL_INTERVAL_MINUTES", poll_raw.get("interval_minutes", 20)),
-            max_pages_per_run=_env_int("MAX_PAGES_PER_RUN", poll_raw.get("max_pages_per_run", 3)),
+            max_pages_per_run=_env_int("MAX_PAGES_PER_RUN", poll_raw.get("max_pages_per_run", 5)),
         ),
         scraper=ScraperConfig(
             headless=_env_bool("HEADLESS", scraper_raw.get("headless", True)),
