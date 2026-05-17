@@ -48,9 +48,12 @@ class MonitorService:
 
         scored: list[ScoredListing] = []
         invalid_count = 0
+        notification_gated_count = 0
         for listing in listings:
             invalid_reason = self.ranker.invalid_reason(listing)
             gate_reason = self.ranker.notification_gate_reason(listing)
+            if invalid_reason is None and gate_reason is not None:
+                notification_gated_count += 1
             logger.debug(
                 "listing_debug",
                 listing_id=listing.listing_id,
@@ -72,8 +75,10 @@ class MonitorService:
                     "distance_km": listing.distance_km,
                 },
                 filtered_out=invalid_reason is not None,
-                filter_reason=invalid_reason,
+                filter_reason=invalid_reason or "valid_for_scoring_and_storage",
+                storage_candidate=invalid_reason is None,
                 notification_gate_reason=gate_reason,
+                notification_candidate=invalid_reason is None and gate_reason is None,
                 max_total_price_eur=self.config.trip.max_total_price_eur,
             )
             if invalid_reason is not None:
@@ -92,6 +97,7 @@ class MonitorService:
             total=len(listings),
             matched=len(scored),
             invalid=invalid_count,
+            notification_gated=notification_gated_count,
             top_score=scored[0].composite_score if scored else None,
         )
 

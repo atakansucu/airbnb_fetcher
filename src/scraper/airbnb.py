@@ -278,9 +278,42 @@ class AirbnbScraper:
   def _parse_structured_display_price(self, sdp: Any) -> float | None:
     if not isinstance(sdp, dict):
       return None
+
+    lines = [
+      line
+      for line in (
+        sdp.get("primaryLine"),
+        sdp.get("secondaryLine"),
+        sdp.get("explanationData"),
+      )
+      if isinstance(line, dict)
+    ]
+
+    # Prefer explicit total labels over a primary nightly price.
+    text_candidates: list[str] = []
+    for line in lines:
+      for key in (
+        "accessibilityLabel",
+        "price",
+        "discountedPrice",
+        "originalPrice",
+        "qualifier",
+        "label",
+        "title",
+        "subtitle",
+      ):
+        val = line.get(key)
+        if isinstance(val, str) and val.strip():
+          text_candidates.append(val)
+    parsed_from_text = self._parse_price_from_text(" ".join(text_candidates))
+    if parsed_from_text:
+      return parsed_from_text
+
     primary = sdp.get("primaryLine") or {}
+    if not isinstance(primary, dict):
+      return None
     qualifier = str(primary.get("qualifier") or "").lower()
-    if qualifier and "total" not in qualifier and "night" not in qualifier:
+    if qualifier and not self._has_price_context(qualifier):
       return None
 
     for key in ("discountedPrice", "price"):
@@ -288,13 +321,9 @@ class AirbnbScraper:
       if val:
         parsed = self._parse_price_string(str(val))
         if parsed:
-          if "night" in qualifier:
+          if self._has_nightly_context(qualifier):
             return parsed * self._nights()
           return parsed
-
-    label = primary.get("accessibilityLabel")
-    if isinstance(label, str):
-      return self._parse_price_from_text(label)
     return None
 
   def _parse_rating_localized(self, text: str) -> tuple[float | None, int | None]:
@@ -408,12 +437,11 @@ class AirbnbScraper:
 
   def _parse_listing_window(self, listing_id: str, window: str) -> Listing | None:
     title_m = re.search(r'"title"\s*:\s*"([^"]{5,200})"', window)
-    price_m = re.search(r'"price(?:String|Total)?"\s*:\s*"?([€$]?\s*[\d,]+)"?', window)
     rating_m = re.search(r'"avgRating(?:Localized)?"\s*:\s*([\d.]+)', window)
     lat_m = re.search(r'"lat(?:itude)?"\s*:\s*([\d.-]+)', window)
     lng_m = re.search(r'"lng|lon(?:gitude)?"\s*:\s*([\d.-]+)', window)
 
-    total = self._parse_price_string(price_m.group(1)) if price_m else None
+    total = self._parse_price_from_text(window)
     rating = float(rating_m.group(1)) if rating_m else None
     lat = float(lat_m.group(1)) if lat_m else None
     lng = float(lng_m.group(1)) if lng_m else None
@@ -440,7 +468,14 @@ class AirbnbScraper:
       if parsed:
         return parsed
     candidates: list[Any] = []
-    for key in ("price", "priceTotal", "totalPrice", "pricingQuote"):
+    for key in (
+      "price",
+      "priceTotal",
+      "totalPrice",
+      "pricingQuote",
+      "structuredContent",
+      "priceDetails",
+    ):
       if key in d:
         candidates.append(d[key])
     for c in candidates:
@@ -455,11 +490,28 @@ class AirbnbScraper:
     if isinstance(val, str):
       return self._parse_price_string(val)
     if isinstance(val, dict):
-      for k in ("total", "amount", "price", "priceString", "discountedPrice"):
+      for k in (
+        "total",
+        "amount",
+        "price",
+        "priceString",
+        "discountedPrice",
+        "totalPrice",
+        "localizedString",
+        "accessibilityLabel",
+      ):
         if k in val:
           p = self._parse_price_value(val[k])
           if p:
             return p
+      text_parts = [str(v) for v in val.values() if isinstance(v, str)]
+      if text_parts:
+        return self._parse_price_from_text(" ".join(text_parts))
+    if isinstance(val, list):
+      for item in val:
+        p = self._parse_price_value(item)
+        if p:
+          return p
     return None
 
   def _parse_price_string(self, s: str) -> float | None:
@@ -580,34 +632,77 @@ class AirbnbScraper:
 
   def _parse_price_from_text(self, text: str) -> float | None:
     nights = self._nights()
-    normalized = text.replace("\xa0", " ")
-    amount = r"([\d][\d\s.,]*)"
+    normalized = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+    amount = r"(\d[\d\s.,]*)"
+    currency_before = rf"(?:€|EUR)\s*{amount}"
+    currency_after = rf"{amount}\s*(?:€|EUR)"
+    total_words = rf"total|for\s+\d+\s+nights?|for\s+{nights}\s+nights?|gesamt|insgesamt|toplam"
+    night_words = r"night|nights?|per\s+night|nightly|nacht|gece"
     total_patterns = [
-      rf"€\s*{amount}\s*(?:total|for\s+{nights}\s+nights?)",
-      rf"€\s*{amount}\s*for\s+\d+\s+nights?",
-      rf"(?:total|for\s+{nights}\s+nights?)\s*€\s*{amount}",
-      rf"total\s*€\s*{amount}",
+      rf"{currency_before}\s*(?:{total_words})",
+      rf"{currency_after}\s*(?:{total_words})",
+      rf"(?:{total_words})\s*{currency_before}",
+      rf"(?:{total_words})\s*{currency_after}",
     ]
     found: list[float] = []
     for pattern in total_patterns:
       for m in re.finditer(pattern, normalized, re.IGNORECASE):
-        p = self._parse_price_string(m.group(1))
+        p = self._parse_price_string(self._first_capture(m))
         if p and p > 50:
           found.append(p)
     if found:
       return found[-1]
 
     nightly_patterns = [
-      rf"€\s*{amount}\s*(?:/)?\s*(?:night|per\s+night)",
-      rf"(?:nightly|per\s+night)\s*€\s*{amount}",
+      rf"{currency_before}\s*(?:/)?\s*(?:{night_words})",
+      rf"{currency_after}\s*(?:/)?\s*(?:{night_words})",
+      rf"(?:{night_words})\s*{currency_before}",
+      rf"(?:{night_words})\s*{currency_after}",
     ]
     nightly: list[float] = []
     for pattern in nightly_patterns:
       for m in re.finditer(pattern, normalized, re.IGNORECASE):
-        p = self._parse_price_string(m.group(1))
+        p = self._parse_price_string(self._first_capture(m))
         if p and p > 10:
           nightly.append(p)
-    return nightly[-1] * nights if nightly else None
+    if nightly:
+      return nightly[-1] * nights
+
+    amounts: list[float] = []
+    for pattern in (currency_before, currency_after):
+      for m in re.finditer(pattern, normalized, re.IGNORECASE):
+        p = self._parse_price_string(self._first_capture(m))
+        if p and p > 10:
+          amounts.append(p)
+    if not amounts:
+      return None
+    if len(amounts) == 1:
+      return amounts[0]
+    totals = [p for p in amounts if p > max(50, nights * 15)]
+    return totals[-1] if totals else amounts[-1]
+
+  @staticmethod
+  def _first_capture(match: re.Match[str]) -> str:
+    for group in match.groups():
+      if group:
+        return group
+    return match.group(0)
+
+  @staticmethod
+  def _has_price_context(text: str) -> bool:
+    return bool(
+      re.search(
+        r"total|night|nights?|per\s+night|nightly|gesamt|insgesamt|toplam|nacht|gece",
+        text,
+        re.IGNORECASE,
+      )
+    )
+
+  @staticmethod
+  def _has_nightly_context(text: str) -> bool:
+    return bool(
+      re.search(r"night|nights?|per\s+night|nightly|nacht|gece", text, re.IGNORECASE)
+    )
 
   def _parse_rating_from_text(self, text: str) -> float | None:
     m = re.search(r"(\d\.\d{1,2})\s*(?:\(|·|out of)", text)

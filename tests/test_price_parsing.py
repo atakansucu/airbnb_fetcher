@@ -50,14 +50,24 @@ def test_parse_price_from_text_total_without_grouping(scraper: AirbnbScraper) ->
     assert scraper._parse_price_from_text("€738 total") == 738.0
 
 
+def test_parse_price_from_text_total_currency_after_amount(scraper: AirbnbScraper) -> None:
+    assert scraper._parse_price_from_text("738 € total") == 738.0
+    assert scraper._parse_price_from_text("738 EUR total") == 738.0
+
+
 def test_parse_price_from_text_nightly_price_as_trip_total(scraper: AirbnbScraper) -> None:
     assert scraper._parse_price_from_text("€123 night") == 738.0
+
+
+def test_parse_price_from_text_nightly_currency_after_amount(scraper: AirbnbScraper) -> None:
+    assert scraper._parse_price_from_text("123 € night") == 738.0
 
 
 def test_parse_price_string_localized_formats(scraper: AirbnbScraper) -> None:
     assert scraper._parse_price_string("€1.234") == 1234.0
     assert scraper._parse_price_string("€1.234,56") == 1234.56
     assert scraper._parse_price_string("€1,234.56") == 1234.56
+    assert scraper._parse_price_string("1 234 €") == 1234.0
 
 
 def test_parse_structured_display_price_nightly(scraper: AirbnbScraper) -> None:
@@ -66,5 +76,21 @@ def test_parse_structured_display_price_nightly(scraper: AirbnbScraper) -> None:
             "price": "€123",
             "qualifier": "night",
         }
+    }
+    assert scraper._parse_structured_display_price(sdp) == 738.0
+
+
+def test_parse_structured_display_price_prefers_secondary_total(
+    scraper: AirbnbScraper,
+) -> None:
+    sdp = {
+        "primaryLine": {
+            "price": "€123",
+            "qualifier": "night",
+        },
+        "secondaryLine": {
+            "price": "€738",
+            "qualifier": "total",
+        },
     }
     assert scraper._parse_structured_display_price(sdp) == 738.0
