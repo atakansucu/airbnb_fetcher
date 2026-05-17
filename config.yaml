@@ -1,0 +1,54 @@
+trip:
+  destination: "Barcelona, Spain"
+  checkin: "2026-06-16"
+  checkout: "2026-06-22"
+  guests: 3
+  max_total_price_eur: 900
+
+polling:
+  interval_minutes: 20
+  max_pages_per_run: 3
+
+scraper:
+  headless: true
+  browser_timeout_ms: 60000
+  scrape_delay_seconds: 2
+
+scoring:
+  weights:
+    distance: 0.30
+    price: 0.30
+    review: 0.15
+    cancellation: 0.15
+    entire_home: 0.10
+  min_review_score: 4.5
+  rare_deal_percentile: 15
+
+filters:
+  require_entire_home: false
+  require_free_cancellation: false
+  require_superhost: false
+  require_self_check_in: false
+  max_distance_km: 8.0
+
+center:
+  name: "Barceloneta plajı"
+  lat: 41.3788
+  lng: 2.1894
+
+preferred_neighborhoods:
+  - Eixample
+  - Gothic Quarter
+  - El Born
+  - Gràcia
+  - Sant Antoni
+  - Barri Gòtic
+  - El Raval
+  - Poble Sec
+  - Barceloneta
+
+notifications:
+  min_score_to_notify: 55
+  notify_on_price_drop: true
+  notify_on_new_listing: true
+  notify_on_rare_deal: true

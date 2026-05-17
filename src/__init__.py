@@ -1,0 +1,1 @@
+"""Airbnb Barcelona trip monitor."""

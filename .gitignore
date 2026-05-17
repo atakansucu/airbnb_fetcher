@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+data/*.db
+logs/*.log
+.playwright/
+.pytest_cache/
+.DS_Store
+.playwright-browsers/

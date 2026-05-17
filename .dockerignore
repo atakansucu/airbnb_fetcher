@@ -1,0 +1,10 @@
+.venv
+.playwright-browsers
+__pycache__
+*.pyc
+.pytest_cache
+.git
+data/*.db-journal
+logs/*
+.env
+*.md

@@ -1,0 +1,21 @@
+{
+  "name": "airbnb-monitoring-workflow",
+  "version": "1.0.0",
+  "description": "A monitoring script for tracking Airbnb listings with notifications.",
+  "main": "src/monitor.js",
+  "scripts": {
+    "start": "node src/monitor.js"
+  },
+  "dependencies": {
+    "playwright": "^1.20.0",
+    "node-fetch": "^2.6.1",
+    "sqlite3": "^5.0.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.20.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,14 @@
+services:
+  airbnb-monitor:
+    build: .
+    container_name: airbnb-barcelona-monitor
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config.yaml:/app/config.yaml:ro
+    shm_size: "1gb"
+    security_opt:
+      - seccomp:unconfined

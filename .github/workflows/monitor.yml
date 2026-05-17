@@ -1,0 +1,43 @@
+# Her 20 dakikada bir tarama — bilgisayarın kapalı olsa da çalışır.
+# Gerekli: GitHub repo + Secrets (TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+
+name: Airbnb Barcelona Monitor
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore listings database
+        uses: actions/cache@v4
+        with:
+          path: data/listings.db
+          key: airbnb-barcelona-listings-db
+
+      - name: Install Python deps and Chromium
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium --with-deps
+
+      - name: Prepare directories
+        run: mkdir -p data logs
+
+      - name: Run one monitor cycle
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HEADLESS: "true"
+          LOG_LEVEL: INFO
+        run: python -m src.main --once
