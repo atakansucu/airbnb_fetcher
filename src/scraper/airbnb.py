@@ -44,6 +44,9 @@ class AirbnbScraper:
       "adults": trip.guests,
       "currency": "EUR",
       "search_type": "filter_change",
+      "price_filter_input_type": 2,
+      "price_filter_num_nights": self._nights(),
+      "price_max": self._search_price_max(),
     }
     if self.config.filters.require_free_cancellation:
       params["flexible_cancellation"] = "true"
@@ -137,6 +140,7 @@ class AirbnbScraper:
             page=page_idx + 1,
             pages_total=max_pages,
             navigation_method=navigation_method,
+            search_price_max_total_eur=self._search_price_max(),
             total_scraped=total_scraped,
             total_unique=len(all_listings),
           )
@@ -288,6 +292,9 @@ class AirbnbScraper:
         destinations.append(destination)
         seen.add(key)
     return destinations or [self.config.trip.destination]
+
+  def _search_price_max(self) -> int:
+    return max(1, int(round(self.config.trip.max_total_price_eur)))
 
   def _page_delay_seconds(self) -> float:
     base = max(0.0, self.config.scraper.scrape_delay_seconds)
