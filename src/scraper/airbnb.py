@@ -174,6 +174,8 @@ class AirbnbScraper:
     return self._extract_current_page(page, url)
 
   def _go_to_next_results_page(self, page: Page) -> bool:
+    started = time.monotonic()
+    max_attempt_seconds = 2.5
     selectors = [
       'nav[aria-label="Search results pagination"] a[aria-label="Next"]',
       'nav[aria-label="Search results pagination"] button[aria-label="Next"]:not([disabled])',
@@ -181,17 +183,37 @@ class AirbnbScraper:
       'button[aria-label="Next"]:not([disabled])',
     ]
     for selector in selectors:
+      remaining_seconds = max_attempt_seconds - (time.monotonic() - started)
+      if remaining_seconds <= 0:
+        break
       try:
         next_button = page.locator(selector).last
-        if not next_button.is_visible(timeout=1000):
+        timeout_ms = max(100, int(min(remaining_seconds, 0.6) * 1000))
+        if not next_button.is_visible(timeout=timeout_ms):
           continue
-        next_button.click()
-        page.wait_for_load_state("domcontentloaded", timeout=15000)
-        page.wait_for_timeout(2000)
+        next_button.click(timeout=max(500, int(remaining_seconds * 1000)))
+        page.wait_for_timeout(1500)
+        logger.info(
+          "pagination_next_selected",
+          selector=selector,
+          seconds=round(time.monotonic() - started, 2),
+          url=page.url,
+        )
         return True
-      except Exception:
+      except Exception as exc:
+        logger.debug(
+          "pagination_next_selector_failed",
+          selector=selector,
+          error=str(exc),
+          seconds=round(time.monotonic() - started, 2),
+        )
         continue
-    logger.info("pagination_next_unavailable", url=page.url)
+    logger.info(
+      "pagination_next_unavailable",
+      fallback="offset_url_fallback",
+      seconds=round(time.monotonic() - started, 2),
+      url=page.url,
+    )
     return False
 
   def _extract_current_page(self, page: Page, url: str) -> list[Listing]:
