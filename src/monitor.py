@@ -44,11 +44,14 @@ class MonitorService:
 
         if not listings:
             logger.warning("no_listings_found")
+            self._log_missing_tracked_listings({})
             return 0
 
         scored: list[ScoredListing] = []
         invalid_count = 0
         notification_gated_count = 0
+        listings_by_id = {listing.listing_id: listing for listing in listings}
+        self._log_missing_tracked_listings(listings_by_id)
         for listing in listings:
             invalid_reason = self.ranker.invalid_reason(listing)
             gate_reason = self.ranker.notification_gate_reason(listing)
@@ -81,6 +84,13 @@ class MonitorService:
                 notification_candidate=invalid_reason is None and gate_reason is None,
                 max_total_price_eur=self.config.trip.max_total_price_eur,
             )
+            self._log_tracked_pipeline_status(
+                listing,
+                status="filtered" if invalid_reason is not None else "scraped",
+                invalid_reason=invalid_reason,
+                gate_reason=gate_reason,
+                stored=False,
+            )
             if invalid_reason is not None:
                 invalid_count += 1
                 continue
@@ -103,6 +113,16 @@ class MonitorService:
 
         for s in scored:
             alerts = self._evaluate_listing(s)
+            gate_reason = self.ranker.notification_gate_reason(s.listing)
+            self._log_tracked_pipeline_status(
+                s.listing,
+                status="gated" if gate_reason is not None else "stored",
+                invalid_reason=None,
+                gate_reason=gate_reason,
+                stored=True,
+                score=s.composite_score,
+                alerts_created=len(alerts),
+            )
             for alert in alerts:
                 if self.dispatcher.dispatch(alert):
                     alerts_sent += 1
@@ -113,6 +133,67 @@ class MonitorService:
             alerts_sent=alerts_sent,
         )
         return alerts_sent
+
+    def _tracked_listing_ids(self) -> set[str]:
+        ids: set[str] = set()
+        for value in self.config.debug.tracked_listing_ids:
+            normalized = AirbnbScraper.normalize_listing_id(value)
+            if normalized:
+                ids.add(normalized)
+        for value in self.config.debug.tracked_listing_urls:
+            normalized = AirbnbScraper.normalize_listing_id(value)
+            if normalized:
+                ids.add(normalized)
+        return ids
+
+    def _log_missing_tracked_listings(self, listings_by_id: dict[str, object]) -> None:
+        for listing_id in sorted(self._tracked_listing_ids()):
+            if listing_id not in listings_by_id:
+                logger.warning(
+                    "tracked_listing_pipeline_status",
+                    listing_id=listing_id,
+                    status="never_seen",
+                    scraped=False,
+                    filtered=False,
+                    gated=False,
+                    stored=False,
+                )
+
+    def _log_tracked_pipeline_status(
+        self,
+        listing: object,
+        *,
+        status: str,
+        invalid_reason: str | None,
+        gate_reason: str | None,
+        stored: bool,
+        score: float | None = None,
+        alerts_created: int | None = None,
+    ) -> None:
+        listing_id = getattr(listing, "listing_id", None)
+        if listing_id not in self._tracked_listing_ids():
+            return
+        logger.info(
+            "tracked_listing_pipeline_status",
+            listing_id=listing_id,
+            status=status,
+            scraped=True,
+            filtered=invalid_reason is not None,
+            gated=gate_reason is not None,
+            stored=stored,
+            invalid_reason=invalid_reason,
+            notification_gate_reason=gate_reason,
+            score=score,
+            alerts_created=alerts_created,
+            title=getattr(listing, "title", None),
+            url=getattr(listing, "url", None),
+            total_price_eur=getattr(listing, "total_price_eur", None),
+            rating=getattr(listing, "review_score", None),
+            room_type=getattr(listing, "room_type", None),
+            is_entire_home=getattr(listing, "is_entire_home", None),
+            free_cancellation=getattr(listing, "free_cancellation", None),
+            neighborhood=getattr(listing, "neighborhood", None),
+        )
 
     def send_test_top_notification(self) -> bool:
         """Send the highest-scored listing matching filters (DB, then live scrape)."""

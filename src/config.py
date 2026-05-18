@@ -95,6 +95,12 @@ class FilterConfig:
 
 
 @dataclass
+class DebugConfig:
+    tracked_listing_ids: list[str] = field(default_factory=list)
+    tracked_listing_urls: list[str] = field(default_factory=list)
+
+
+@dataclass
 class AppConfig:
     trip: TripConfig = field(default_factory=TripConfig)
     polling: PollingConfig = field(default_factory=PollingConfig)
@@ -104,6 +110,7 @@ class AppConfig:
     rare_deal_percentile: float = 15.0
     center: CenterConfig = field(default_factory=CenterConfig)
     filters: FilterConfig = field(default_factory=FilterConfig)
+    debug: DebugConfig = field(default_factory=DebugConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
     preferred_neighborhoods: list[str] = field(default_factory=list)
     database_path: Path = field(default_factory=lambda: PROJECT_ROOT / "data" / "listings.db")
@@ -131,6 +138,7 @@ def load_config(env_file: Path | None = None) -> AppConfig:
     scoring_raw = raw.get("scoring", {})
     weights_raw = scoring_raw.get("weights", {})
     filters_raw = raw.get("filters", {})
+    debug_raw = raw.get("debug", {})
     center_raw = raw.get("center", {})
     notif_raw = raw.get("notifications", {})
 
@@ -204,6 +212,14 @@ def load_config(env_file: Path | None = None) -> AppConfig:
                 "MAX_DISTANCE_KM", filters_raw.get("max_distance_km", 4.0)
             ),
         ),
+        debug=DebugConfig(
+            tracked_listing_ids=_split_env_list(
+                "TRACKED_LISTING_IDS", debug_raw.get("tracked_listing_ids", [])
+            ),
+            tracked_listing_urls=_split_env_list(
+                "TRACKED_LISTING_URLS", debug_raw.get("tracked_listing_urls", [])
+            ),
+        ),
         notifications=NotificationConfig(
             min_score_to_notify=notif_raw.get("min_score_to_notify", 55),
             notify_on_price_drop=notif_raw.get("notify_on_price_drop", True),
@@ -219,3 +235,12 @@ def load_config(env_file: Path | None = None) -> AppConfig:
         log_file=Path(os.getenv("LOG_FILE", str(PROJECT_ROOT / "logs" / "monitor.log"))),
     )
     return cfg
+
+
+def _split_env_list(key: str, default: list[str] | str | None) -> list[str]:
+    raw = os.getenv(key)
+    if raw:
+        return [item.strip() for item in raw.split(";") if item.strip()]
+    if isinstance(default, str):
+        return [default.strip()] if default.strip() else []
+    return [str(item).strip() for item in (default or []) if str(item).strip()]

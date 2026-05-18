@@ -9,7 +9,7 @@ import re
 import time
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus, urlencode, urlparse
 
 import structlog
 from playwright.sync_api import Browser, Page, Playwright, sync_playwright
@@ -27,6 +27,7 @@ class AirbnbScraper:
     self.config = config
     self._playwright: Playwright | None = None
     self._browser: Browser | None = None
+    self.tracked_listing_ids = self._configured_tracked_listing_ids()
 
   def _nights(self) -> int:
     checkin = datetime.strptime(self.config.trip.checkin, "%Y-%m-%d")
@@ -143,6 +144,7 @@ class AirbnbScraper:
           total_scraped += len(listings)
           for lst in listings:
             all_listings[lst.listing_id] = lst
+          self._log_tracked_page_hits(destination, page_idx + 1, listings)
           elapsed = time.monotonic() - started
           page_elapsed = time.monotonic() - page_started
           pages_done = ((destination_idx - 1) * max_pages) + page_idx + 1
@@ -200,7 +202,81 @@ class AirbnbScraper:
       destinations=self._search_destinations(),
       elapsed_seconds=round(elapsed, 2),
     )
+    self._log_tracked_scrape_summary(all_listings)
     return list(all_listings.values())
+
+  def _configured_tracked_listing_ids(self) -> set[str]:
+    ids: set[str] = set()
+    for listing_id in self.config.debug.tracked_listing_ids:
+      normalized = self.normalize_listing_id(listing_id)
+      if normalized:
+        ids.add(normalized)
+      else:
+        logger.warning("tracked_listing_id_invalid", value=listing_id)
+    for url in self.config.debug.tracked_listing_urls:
+      normalized = self.normalize_listing_id(url)
+      if normalized:
+        ids.add(normalized)
+      else:
+        logger.warning("tracked_listing_url_invalid", url=url)
+    return ids
+
+  @staticmethod
+  def normalize_listing_id(value: str | None) -> str | None:
+    """Extract a canonical Airbnb room ID from airbnb.com/.com.tr URLs or raw IDs."""
+    if not value:
+      return None
+    raw = value.strip()
+    if raw.isdigit():
+      return raw
+    parsed = urlparse(raw)
+    haystack = parsed.path if parsed.scheme and parsed.netloc else raw
+    match = LISTING_ID_RE.search(haystack)
+    return match.group(1) if match else None
+
+  def _log_tracked_page_hits(
+    self, destination: str, page_number: int, listings: list[Listing]
+  ) -> None:
+    if not self.tracked_listing_ids:
+      return
+    page_ids = {listing.listing_id for listing in listings}
+    for listing_id in sorted(self.tracked_listing_ids):
+      if listing_id in page_ids:
+        listing = next(lst for lst in listings if lst.listing_id == listing_id)
+        logger.info(
+          "tracked_listing_scraped_on_page",
+          listing_id=listing_id,
+          destination=destination,
+          page=page_number,
+          title=listing.title,
+          url=listing.url,
+          total_price_eur=listing.total_price_eur,
+          source=listing.raw.get("source"),
+        )
+
+  def _log_tracked_scrape_summary(self, listings: dict[str, Listing]) -> None:
+    if not self.tracked_listing_ids:
+      return
+    for listing_id in sorted(self.tracked_listing_ids):
+      listing = listings.get(listing_id)
+      if listing:
+        logger.info(
+          "tracked_listing_scrape_status",
+          listing_id=listing_id,
+          status="scraped",
+          title=listing.title,
+          url=listing.url,
+          total_price_eur=listing.total_price_eur,
+          source=listing.raw.get("source"),
+        )
+      else:
+        logger.warning(
+          "tracked_listing_scrape_status",
+          listing_id=listing_id,
+          status="never_seen",
+          destinations=self._search_destinations(),
+          pages=self.config.polling.max_pages_per_run,
+        )
 
   def _search_destinations(self) -> list[str]:
     seen: set[str] = set()
@@ -449,22 +525,22 @@ class AirbnbScraper:
     # Prefer explicit total labels over a primary nightly price.
     text_candidates: list[str] = []
     for line in lines:
-      for key in (
-        "accessibilityLabel",
-        "price",
-        "discountedPrice",
-        "originalPrice",
-        "qualifier",
-        "label",
-        "title",
-        "subtitle",
-      ):
+      qualifier = str(line.get("qualifier") or line.get("label") or "").lower()
+      accessible = str(line.get("accessibilityLabel") or "").lower()
+      if not self._has_price_context(f"{qualifier} {accessible}"):
+        continue
+      for key in ("discountedPrice", "price", "accessibilityLabel", "title", "subtitle"):
         val = line.get(key)
-        if isinstance(val, str) and val.strip():
-          text_candidates.append(val)
-    parsed_from_text = self._parse_price_from_text(" ".join(text_candidates))
-    if parsed_from_text:
-      return parsed_from_text
+        if not isinstance(val, str) or not val.strip():
+          continue
+        parsed = self._parse_price_from_text(f"{val} {qualifier} {accessible}")
+        if parsed:
+          return parsed
+        text_candidates.append(f"{val} {qualifier} {accessible}")
+    if text_candidates:
+      parsed_from_text = self._parse_price_from_text(" ".join(text_candidates))
+      if parsed_from_text:
+        return parsed_from_text
 
     primary = sdp.get("primaryLine") or {}
     if not isinstance(primary, dict):

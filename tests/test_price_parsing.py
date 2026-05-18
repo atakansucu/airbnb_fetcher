@@ -18,6 +18,24 @@ def test_decode_demand_stay_id(scraper: AirbnbScraper) -> None:
     assert scraper._decode_demand_stay_id("21464686") == "21464686"
 
 
+def test_normalize_listing_id_from_airbnb_domains(scraper: AirbnbScraper) -> None:
+    assert scraper.normalize_listing_id("887692388841951937") == "887692388841951937"
+    assert (
+        scraper.normalize_listing_id("https://www.airbnb.com/rooms/887692388841951937")
+        == "887692388841951937"
+    )
+    assert (
+        scraper.normalize_listing_id("https://www.airbnb.com.tr/rooms/887692388841951937")
+        == "887692388841951937"
+    )
+    assert (
+        scraper.normalize_listing_id(
+            "https://www.airbnb.com.tr/rooms/887692388841951937?adults=3"
+        )
+        == "887692388841951937"
+    )
+
+
 def test_parse_structured_display_price_qualified(scraper: AirbnbScraper) -> None:
     sdp = {
         "primaryLine": {

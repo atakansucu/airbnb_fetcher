@@ -34,6 +34,11 @@ filters:
   require_self_check_in: false
   max_distance_km: 8.0
 
+debug:
+  tracked_listing_urls:
+    - "https://www.airbnb.com.tr/rooms/887692388841951937"
+  tracked_listing_ids: []
+
 center:
   name: "Barceloneta plajı"
   lat: 41.3788
