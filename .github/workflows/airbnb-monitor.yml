@@ -5,6 +5,7 @@ name: Airbnb Barcelona Monitor
 
 on:
   schedule:
+    # GitHub cron is evaluated in UTC; this runs at :00, :20, and :40.
     - cron: "*/20 * * * *"
   workflow_dispatch:
   push:
