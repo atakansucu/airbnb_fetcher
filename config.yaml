@@ -1,5 +1,8 @@
 trip:
   destination: "Barcelona, Spain"
+  destinations:
+    - "Barcelona, Spain"
+    - "Badalona, Spain"
   checkin: "2026-06-16"
   checkout: "2026-06-22"
   guests: 3

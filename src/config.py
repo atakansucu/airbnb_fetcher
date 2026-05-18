@@ -33,6 +33,7 @@ def _env_int(key: str, default: int) -> int:
 @dataclass
 class TripConfig:
     destination: str = "Barcelona, Spain"
+    destinations: list[str] = field(default_factory=lambda: ["Barcelona, Spain"])
     checkin: str = "2026-06-16"
     checkout: str = "2026-06-22"
     guests: int = 3
@@ -133,9 +134,17 @@ def load_config(env_file: Path | None = None) -> AppConfig:
     center_raw = raw.get("center", {})
     notif_raw = raw.get("notifications", {})
 
+    destination = os.getenv("TRIP_DESTINATION", trip_raw.get("destination", "Barcelona, Spain"))
+    destinations_raw = os.getenv("TRIP_DESTINATIONS")
+    if destinations_raw:
+        destinations = [d.strip() for d in destinations_raw.split(";") if d.strip()]
+    else:
+        destinations = trip_raw.get("destinations") or [destination]
+
     cfg = AppConfig(
         trip=TripConfig(
-            destination=os.getenv("TRIP_DESTINATION", trip_raw.get("destination", "Barcelona, Spain")),
+            destination=destination,
+            destinations=destinations,
             checkin=os.getenv("TRIP_CHECKIN", trip_raw.get("checkin", "2026-06-16")),
             checkout=os.getenv("TRIP_CHECKOUT", trip_raw.get("checkout", "2026-06-22")),
             guests=_env_int("TRIP_GUESTS", trip_raw.get("guests", 3)),

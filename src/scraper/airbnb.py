@@ -33,9 +33,10 @@ class AirbnbScraper:
     checkout = datetime.strptime(self.config.trip.checkout, "%Y-%m-%d")
     return max(1, (checkout - checkin).days)
 
-  def build_search_url(self, page_offset: int = 0) -> str:
+  def build_search_url(self, page_offset: int = 0, destination: str | None = None) -> str:
     trip = self.config.trip
-    dest_slug = quote_plus(trip.destination.replace(", ", "--").replace(" ", "-"))
+    search_destination = destination or trip.destination
+    dest_slug = quote_plus(search_destination.replace(", ", "--").replace(" ", "-"))
     params: dict[str, str | int] = {
       "checkin": trip.checkin,
       "checkout": trip.checkout,
@@ -91,61 +92,97 @@ class AirbnbScraper:
         locale="en-US",
         viewport={"width": 1440, "height": 900},
       )
-      page = context.new_page()
-      page.set_default_timeout(self.config.scraper.browser_timeout_ms)
-
-      for page_idx in range(max_pages):
-        requested_url = self.build_search_url(page_offset=page_idx)
-        navigation_method = "initial_url"
-        if page_idx == 0:
-          url = requested_url
-          scrape_page = lambda: self._scrape_page(page, url)
-        elif self._go_to_next_results_page(page):
-          url = page.url
-          navigation_method = "pagination_next"
-          scrape_page = lambda: self._extract_current_page(page, url)
-        else:
-          url = requested_url
-          navigation_method = "offset_url_fallback"
-          scrape_page = lambda: self._scrape_page(page, url)
-
-        page_started = time.monotonic()
-        logger.info(
-          "scraping_page",
-          url=url,
-          page=page_idx + 1,
-          pages_total=max_pages,
-          navigation_method=navigation_method,
-          total_scraped=total_scraped,
-          total_unique=len(all_listings),
-        )
-        listings = scrape_page()
-        total_scraped += len(listings)
-        for lst in listings:
-          all_listings[lst.listing_id] = lst
-        elapsed = time.monotonic() - started
-        page_elapsed = time.monotonic() - page_started
-        pages_done = page_idx + 1
-        avg_page_seconds = elapsed / pages_done
-        estimated_runtime_seconds = avg_page_seconds * max_pages
-        duplicates_removed = total_scraped - len(all_listings)
-        logger.info(
-          "scraping_page_complete",
-          page=pages_done,
-          pages_total=max_pages,
-          navigation_method=navigation_method,
-          page_listings=len(listings),
-          total_scraped=total_scraped,
-          total_unique=len(all_listings),
-          duplicates_removed=duplicates_removed,
-          page_seconds=round(page_elapsed, 2),
-          elapsed_seconds=round(elapsed, 2),
-          estimated_runtime_seconds=round(estimated_runtime_seconds, 2),
-        )
-        if page_idx < max_pages - 1:
+      destinations = self._search_destinations()
+      for destination_idx, destination in enumerate(destinations, start=1):
+        if destination_idx > 1:
           delay = self._page_delay_seconds()
-          logger.debug("scraping_page_delay", seconds=round(delay, 2))
+          logger.debug(
+            "scraping_destination_delay",
+            destination=destination,
+            seconds=round(delay, 2),
+          )
           time.sleep(delay)
+
+        page = context.new_page()
+        page.set_default_timeout(self.config.scraper.browser_timeout_ms)
+        destination_scraped_start = total_scraped
+        destination_unique_start = len(all_listings)
+
+        for page_idx in range(max_pages):
+          requested_url = self.build_search_url(
+            page_offset=page_idx,
+            destination=destination,
+          )
+          navigation_method = "initial_url"
+          if page_idx == 0:
+            url = requested_url
+            scrape_page = lambda: self._scrape_page(page, url)
+          elif self._go_to_next_results_page(page):
+            url = page.url
+            navigation_method = "pagination_next"
+            scrape_page = lambda: self._extract_current_page(page, url)
+          else:
+            url = requested_url
+            navigation_method = "offset_url_fallback"
+            scrape_page = lambda: self._scrape_page(page, url)
+
+          page_started = time.monotonic()
+          logger.info(
+            "scraping_page",
+            destination=destination,
+            destination_index=destination_idx,
+            destinations_total=len(destinations),
+            url=url,
+            page=page_idx + 1,
+            pages_total=max_pages,
+            navigation_method=navigation_method,
+            total_scraped=total_scraped,
+            total_unique=len(all_listings),
+          )
+          listings = scrape_page()
+          total_scraped += len(listings)
+          for lst in listings:
+            all_listings[lst.listing_id] = lst
+          elapsed = time.monotonic() - started
+          page_elapsed = time.monotonic() - page_started
+          pages_done = ((destination_idx - 1) * max_pages) + page_idx + 1
+          total_pages = len(destinations) * max_pages
+          avg_page_seconds = elapsed / pages_done
+          estimated_runtime_seconds = avg_page_seconds * total_pages
+          duplicates_removed = total_scraped - len(all_listings)
+          logger.info(
+            "scraping_page_complete",
+            destination=destination,
+            destination_index=destination_idx,
+            destinations_total=len(destinations),
+            page=page_idx + 1,
+            pages_total=max_pages,
+            navigation_method=navigation_method,
+            page_listings=len(listings),
+            total_scraped=total_scraped,
+            total_unique=len(all_listings),
+            duplicates_removed=duplicates_removed,
+            page_seconds=round(page_elapsed, 2),
+            elapsed_seconds=round(elapsed, 2),
+            estimated_runtime_seconds=round(estimated_runtime_seconds, 2),
+          )
+          if page_idx < max_pages - 1:
+            delay = self._page_delay_seconds()
+            logger.debug("scraping_page_delay", seconds=round(delay, 2))
+            time.sleep(delay)
+
+        logger.info(
+          "scraping_destination_complete",
+          destination=destination,
+          destination_index=destination_idx,
+          destinations_total=len(destinations),
+          pages=max_pages,
+          destination_scraped=total_scraped - destination_scraped_start,
+          destination_new_unique=len(all_listings) - destination_unique_start,
+          total_scraped=total_scraped,
+          total_unique=len(all_listings),
+        )
+        page.close()
 
       context.close()
     except Exception as exc:
@@ -160,9 +197,21 @@ class AirbnbScraper:
       total_unique=len(all_listings),
       duplicates_removed=total_scraped - len(all_listings),
       pages=max_pages,
+      destinations=self._search_destinations(),
       elapsed_seconds=round(elapsed, 2),
     )
     return list(all_listings.values())
+
+  def _search_destinations(self) -> list[str]:
+    seen: set[str] = set()
+    destinations: list[str] = []
+    for raw in self.config.trip.destinations or [self.config.trip.destination]:
+      destination = raw.strip()
+      key = destination.lower()
+      if destination and key not in seen:
+        destinations.append(destination)
+        seen.add(key)
+    return destinations or [self.config.trip.destination]
 
   def _page_delay_seconds(self) -> float:
     base = max(0.0, self.config.scraper.scrape_delay_seconds)
