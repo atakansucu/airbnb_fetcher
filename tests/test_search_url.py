@@ -20,7 +20,7 @@ def test_canonical_room_url_uses_detail_price_base_url() -> None:
     scraper = AirbnbScraper(cfg)
 
     assert scraper._canonical_room_url("887692388841951937").startswith(
-        "https://www.airbnb.com.tr/rooms/887692388841951937"
+        "https://www.airbnb.com/rooms/887692388841951937"
     )
 
 
@@ -29,5 +29,14 @@ def test_near_budget_price_snaps_to_budget() -> None:
     scraper = AirbnbScraper(cfg)
 
     assert scraper._snap_near_budget_price(901.0) == 900.0
-    assert scraper._snap_near_budget_price(899.5) == 900.0
+    assert scraper._snap_near_budget_price(879.0) == 900.0
+    assert scraper._snap_near_budget_price(874.0) == 874.0
     assert scraper._snap_near_budget_price(902.0) == 902.0
+
+
+def test_effective_verified_price_uses_higher_near_budget_price() -> None:
+    cfg = AppConfig(trip=TripConfig(max_total_price_eur=900))
+    scraper = AirbnbScraper(cfg)
+
+    assert scraper._effective_verified_price(879.0, 831.0) == 900.0
+    assert scraper._effective_verified_price(901.0, 1000.26) == 1000.26

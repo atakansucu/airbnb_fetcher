@@ -358,7 +358,7 @@ class AirbnbScraper:
         original_total_price_eur=original_price,
       )
       return None
-    verified_price = self._snap_near_budget_price(verified_price)
+    verified_price = self._effective_verified_price(original_price, verified_price)
 
     listing.raw["search_total_price_eur"] = original_price
     listing.raw["detail_total_price_eur"] = verified_price
@@ -388,9 +388,18 @@ class AirbnbScraper:
 
   def _snap_near_budget_price(self, price: float) -> float:
     max_price = self.config.trip.max_total_price_eur
-    if max_price - 1 <= price <= max_price + 1:
+    margin = max(1.0, self.config.scraper.detail_price_verify_margin_eur)
+    if max_price - margin <= price <= max_price + 1:
       return float(max_price)
     return price
+
+  def _effective_verified_price(
+    self, original_price: float | None, detail_price: float
+  ) -> float:
+    candidates = [detail_price]
+    if original_price is not None:
+      candidates.append(original_price)
+    return self._snap_near_budget_price(max(candidates))
 
   def _search_destinations(self) -> list[str]:
     seen: set[str] = set()
