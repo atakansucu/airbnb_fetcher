@@ -53,6 +53,8 @@ class ScraperConfig:
     scrape_delay_seconds: float = 2.0
     detail_price_verify_margin_eur: float = 25.0
     max_detail_price_verifications: int = 8
+    detail_price_base_url: str = "https://www.airbnb.com"
+    detail_price_wait_ms: int = 6500
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -181,6 +183,14 @@ def load_config(env_file: Path | None = None) -> AppConfig:
             max_detail_price_verifications=_env_int(
                 "MAX_DETAIL_PRICE_VERIFICATIONS",
                 scraper_raw.get("max_detail_price_verifications", 8),
+            ),
+            detail_price_base_url=os.getenv(
+                "DETAIL_PRICE_BASE_URL",
+                scraper_raw.get("detail_price_base_url", "https://www.airbnb.com"),
+            ),
+            detail_price_wait_ms=_env_int(
+                "DETAIL_PRICE_WAIT_MS",
+                scraper_raw.get("detail_price_wait_ms", 6500),
             ),
             user_agent=os.getenv(
                 "USER_AGENT",

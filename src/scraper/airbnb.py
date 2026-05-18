@@ -337,7 +337,12 @@ class AirbnbScraper:
     original_price = listing.total_price_eur
     verify_url = self._canonical_room_url(listing.listing_id)
     page.goto(verify_url, wait_until="domcontentloaded", timeout=20000)
-    page.wait_for_timeout(3500)
+    page.wait_for_timeout(self.config.scraper.detail_price_wait_ms)
+    try:
+      page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
+      page.wait_for_timeout(1000)
+    except Exception:
+      pass
     text = ""
     try:
       text = page.locator("body").inner_text(timeout=3000)
@@ -377,7 +382,8 @@ class AirbnbScraper:
     return verified_price
 
   def _canonical_room_url(self, listing_id: str) -> str:
-    return f"https://www.airbnb.com/rooms/{listing_id}{self._trip_query_suffix()}"
+    base_url = self.config.scraper.detail_price_base_url.rstrip("/")
+    return f"{base_url}/rooms/{listing_id}{self._trip_query_suffix()}"
 
   def _search_destinations(self) -> list[str]:
     seen: set[str] = set()

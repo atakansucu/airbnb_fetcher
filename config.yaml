@@ -18,6 +18,8 @@ scraper:
   scrape_delay_seconds: 2
   detail_price_verify_margin_eur: 25
   max_detail_price_verifications: 8
+  detail_price_base_url: "https://www.airbnb.com"
+  detail_price_wait_ms: 6500
 
 scoring:
   weights:
