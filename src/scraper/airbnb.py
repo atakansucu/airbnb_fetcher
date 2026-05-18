@@ -190,6 +190,7 @@ class AirbnbScraper:
         )
         page.close()
 
+      self._verify_detail_prices(context, all_listings)
       context.close()
     except Exception as exc:
       logger.exception("scrape_failed", error=str(exc))
@@ -281,6 +282,102 @@ class AirbnbScraper:
           destinations=self._search_destinations(),
           pages=self.config.polling.max_pages_per_run,
         )
+
+  def _verify_detail_prices(
+    self, context: Any, listings: dict[str, Listing]
+  ) -> None:
+    candidates = self._detail_price_verification_candidates(listings)
+    if not candidates:
+      return
+
+    logger.info(
+      "detail_price_verification_started",
+      candidates=len(candidates),
+      margin_eur=self.config.scraper.detail_price_verify_margin_eur,
+      max_verifications=self.config.scraper.max_detail_price_verifications,
+    )
+    for listing in candidates:
+      page = context.new_page()
+      try:
+        verified = self._verify_listing_detail_price(page, listing)
+      except Exception as exc:
+        logger.debug(
+          "detail_price_verification_failed",
+          listing_id=listing.listing_id,
+          url=self._canonical_room_url(listing.listing_id),
+          error=str(exc),
+        )
+      finally:
+        page.close()
+
+  def _detail_price_verification_candidates(
+    self, listings: dict[str, Listing]
+  ) -> list[Listing]:
+    max_price = self.config.trip.max_total_price_eur
+    margin = max(0.0, self.config.scraper.detail_price_verify_margin_eur)
+    limit = max(0, self.config.scraper.max_detail_price_verifications)
+    tracked = [
+      listing
+      for listing_id, listing in listings.items()
+      if listing_id in self.tracked_listing_ids
+    ]
+    near_threshold = [
+      listing
+      for listing in listings.values()
+      if listing.listing_id not in self.tracked_listing_ids
+      and listing.total_price_eur is not None
+      and max_price - margin <= listing.total_price_eur <= max_price + margin
+    ]
+    near_threshold.sort(key=lambda listing: abs((listing.total_price_eur or 0) - max_price))
+    if limit == 0:
+      return tracked
+    return (tracked + near_threshold)[: max(limit, len(tracked))]
+
+  def _verify_listing_detail_price(self, page: Page, listing: Listing) -> float | None:
+    original_price = listing.total_price_eur
+    verify_url = self._canonical_room_url(listing.listing_id)
+    page.goto(verify_url, wait_until="domcontentloaded", timeout=20000)
+    page.wait_for_timeout(3500)
+    text = ""
+    try:
+      text = page.locator("body").inner_text(timeout=3000)
+    except Exception:
+      text = page.content()
+
+    verified_price = self._parse_detail_total_price(text)
+    if verified_price is None:
+      logger.debug(
+        "detail_price_not_found",
+        listing_id=listing.listing_id,
+        url=verify_url,
+        original_total_price_eur=original_price,
+      )
+      return None
+
+    listing.raw["search_total_price_eur"] = original_price
+    listing.raw["detail_total_price_eur"] = verified_price
+    listing.raw["detail_price_verified"] = True
+    if original_price is None or abs(verified_price - original_price) >= 0.5:
+      listing.total_price_eur = verified_price
+      logger.info(
+        "detail_price_updated",
+        listing_id=listing.listing_id,
+        title=listing.title,
+        search_total_price_eur=original_price,
+        detail_total_price_eur=verified_price,
+        url=verify_url,
+      )
+    else:
+      logger.info(
+        "detail_price_confirmed",
+        listing_id=listing.listing_id,
+        total_price_eur=listing.total_price_eur,
+        url=verify_url,
+      )
+    return verified_price
+
+  def _canonical_room_url(self, listing_id: str) -> str:
+    return f"https://www.airbnb.com/rooms/{listing_id}{self._trip_query_suffix()}"
 
   def _search_destinations(self) -> list[str]:
     seen: set[str] = set()
@@ -920,6 +1017,34 @@ class AirbnbScraper:
       return amounts[0]
     totals = [p for p in amounts if p > max(50, nights * 15)]
     return totals[-1] if totals else amounts[-1]
+
+  def _parse_detail_total_price(self, text: str) -> float | None:
+    normalized = re.sub(r"\s+", " ", text.replace("\xa0", " ")).strip()
+    amount = r"(\d[\d\s.,]*)"
+    currency_before = rf"(?:€|EUR)\s*{amount}"
+    currency_after = rf"{amount}\s*(?:€|EUR)"
+    final_total_words = (
+      r"total|total\s+eur|grand\s+total|amount\s+due|gesamt|insgesamt|toplam"
+    )
+    before_tax_words = r"before\s+tax|before\s+taxes|excluding\s+tax|taxes?\s+excluded"
+
+    candidates: list[float] = []
+    for pattern in (
+      rf"(?:{final_total_words})\s*{currency_before}",
+      rf"(?:{final_total_words})\s*{currency_after}",
+      rf"{currency_before}\s*(?:{final_total_words})",
+      rf"{currency_after}\s*(?:{final_total_words})",
+    ):
+      for m in re.finditer(pattern, normalized, re.IGNORECASE):
+        window = normalized[max(0, m.start() - 60) : m.end() + 60]
+        if re.search(before_tax_words, window, re.IGNORECASE):
+          continue
+        parsed = self._parse_price_string(self._first_capture(m))
+        if parsed and parsed > 50:
+          candidates.append(parsed)
+    if candidates:
+      return candidates[-1]
+    return self._parse_price_from_text(normalized)
 
   @staticmethod
   def _first_capture(match: re.Match[str]) -> str:

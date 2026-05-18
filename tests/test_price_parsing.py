@@ -112,3 +112,13 @@ def test_parse_structured_display_price_prefers_secondary_total(
         },
     }
     assert scraper._parse_structured_display_price(sdp) == 738.0
+
+
+def test_parse_detail_total_price_prefers_final_total(scraper: AirbnbScraper) -> None:
+    text = "€879 total before taxes Cleaning fee €21 Total €900"
+    assert scraper._parse_detail_total_price(text) == 900.0
+
+
+def test_parse_detail_total_price_skips_before_tax_total(scraper: AirbnbScraper) -> None:
+    text = "Price details 6 nights x €146.50 €879 total before taxes"
+    assert scraper._parse_detail_total_price(text) == 879.0

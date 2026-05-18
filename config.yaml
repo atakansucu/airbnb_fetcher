@@ -16,6 +16,8 @@ scraper:
   headless: true
   browser_timeout_ms: 60000
   scrape_delay_seconds: 2
+  detail_price_verify_margin_eur: 25
+  max_detail_price_verifications: 8
 
 scoring:
   weights:

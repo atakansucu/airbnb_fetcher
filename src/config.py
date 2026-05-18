@@ -51,6 +51,8 @@ class ScraperConfig:
     headless: bool = True
     browser_timeout_ms: int = 60000
     scrape_delay_seconds: float = 2.0
+    detail_price_verify_margin_eur: float = 25.0
+    max_detail_price_verifications: int = 8
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -171,6 +173,14 @@ def load_config(env_file: Path | None = None) -> AppConfig:
             ),
             scrape_delay_seconds=_env_float(
                 "SCRAPE_DELAY_SECONDS", scraper_raw.get("scrape_delay_seconds", 2)
+            ),
+            detail_price_verify_margin_eur=_env_float(
+                "DETAIL_PRICE_VERIFY_MARGIN_EUR",
+                scraper_raw.get("detail_price_verify_margin_eur", 25),
+            ),
+            max_detail_price_verifications=_env_int(
+                "MAX_DETAIL_PRICE_VERIFICATIONS",
+                scraper_raw.get("max_detail_price_verifications", 8),
             ),
             user_agent=os.getenv(
                 "USER_AGENT",
