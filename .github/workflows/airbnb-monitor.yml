@@ -14,6 +14,10 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   scan:
     runs-on: ubuntu-latest
@@ -22,25 +26,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Prepare directories
+        run: mkdir -p data logs
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Restore listings database
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: data/listings.db
-          key: airbnb-barcelona-listings-db-${{ github.run_id }}
+          key: airbnb-barcelona-listings-db
           restore-keys: |
+            airbnb-barcelona-listings-db
             airbnb-barcelona-listings-db-
 
       - name: Install Python deps and Chromium
         run: |
           pip install -r requirements.txt
           playwright install chromium --with-deps
-
-      - name: Prepare directories
-        run: mkdir -p data logs
 
       - name: Run one monitor cycle
         env:
@@ -49,3 +54,16 @@ jobs:
           HEADLESS: "true"
           LOG_LEVEL: INFO
         run: python -m src.main --once
+
+      - name: Refresh listings database cache
+        if: ${{ success() && github.event_name != 'pull_request' && hashFiles('data/listings.db') != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh cache delete airbnb-barcelona-listings-db --repo "${{ github.repository }}" || true
+
+      - name: Save listings database
+        if: ${{ success() && github.event_name != 'pull_request' && hashFiles('data/listings.db') != '' }}
+        uses: actions/cache/save@v4
+        with:
+          path: data/listings.db
+          key: airbnb-barcelona-listings-db
