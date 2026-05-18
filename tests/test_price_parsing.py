@@ -122,3 +122,10 @@ def test_parse_detail_total_price_prefers_final_total(scraper: AirbnbScraper) ->
 def test_parse_detail_total_price_skips_before_tax_total(scraper: AirbnbScraper) -> None:
     text = "Price details 6 nights x €146.50 €879 total before taxes"
     assert scraper._parse_detail_total_price(text) == 879.0
+
+
+def test_parse_detail_total_price_ignores_later_recommendations(
+    scraper: AirbnbScraper,
+) -> None:
+    text = "€900 total Main listing You might also like €2,188 total"
+    assert scraper._parse_detail_total_price(text) == 900.0

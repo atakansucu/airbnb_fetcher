@@ -1056,7 +1056,7 @@ class AirbnbScraper:
         if parsed and parsed > 50:
           candidates.append(parsed)
     if candidates:
-      return candidates[-1]
+      return candidates[0]
     return self._parse_price_from_text(normalized)
 
   @staticmethod
